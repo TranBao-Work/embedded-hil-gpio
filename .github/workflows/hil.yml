@@ -1,0 +1,32 @@
+name: HIL Testing Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted
+
+    steps:
+    - name: Lay ma nguon tu GitHub
+      uses: actions/checkout@v3
+
+    - name: Nap Yocto SDK & Bien dich
+      run: |
+        source /opt/poky/5.0.20/environment-setup-cortexa72-poky-linux
+        $CC -o hil_test tests/hil_test.c src/gpio_ctrl.c -lgpiod
+
+    - name: Day file sang Raspberry Pi 4 (/tmp)
+      run: |
+        scp hil_test root@10.42.0.139:/tmp/
+
+    - name: Thuc thi HIL Test tren Pi 4
+      run: |
+        ssh root@10.42.0.139 "/tmp/hil_test"
+
+    - name: Don dep file rac sau khi test
+      run: |
+        ssh root@10.42.0.139 "rm /tmp/hil_test"
