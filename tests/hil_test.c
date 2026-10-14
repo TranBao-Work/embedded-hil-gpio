@@ -175,6 +175,8 @@ int test_T4() {
     pthread_t tid;
     pthread_create(&tid, NULL, monitor_thread_func, NULL);
 
+    usleep(10000);
+
     // Phat 10 xung, chu ky 100ms
     EXPECT_EQ(gpio_pulse(17, 10, 100), GPIO_OK, "Lenh phat xung phai tra ve OK", &fails);
 
