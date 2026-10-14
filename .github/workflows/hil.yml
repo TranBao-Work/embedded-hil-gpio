@@ -16,6 +16,7 @@ jobs:
 
     - name: Nap Yocto SDK & Bien dich
       run: |
+        unset LD_LIBRARY_PATH
         source /opt/poky/5.0.20/environment-setup-cortexa72-poky-linux
         $CC -o hil_test tests/hil_test.c src/gpio_ctrl.c -lgpiod
 
