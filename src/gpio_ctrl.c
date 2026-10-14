@@ -2,11 +2,12 @@
 #include <gpiod.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <errno.h> // Để in lỗi hệ thống
 
 #define MAX_PINS 30
 #define CHIP_PATH "/dev/gpiochip4"
 
-static struct gpiod_chip *chip = NULL;
+// Bỏ biến chip toàn cục, chỉ giữ lại mảng lưu các requests
 static struct gpiod_line_request *requests[MAX_PINS] = {NULL};
 static int pin_dirs[MAX_PINS] = {
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
@@ -18,16 +19,21 @@ int gpio_init(int pin, int dir) {
     if (pin < 2 || pin > 27) return GPIO_ERR_PARAM;
     if (dir != GPIO_IN && dir != GPIO_OUT) return GPIO_ERR_PARAM;
 
-    if (chip == NULL) {
-        chip = gpiod_chip_open(CHIP_PATH);
-        if (!chip) return GPIO_ERR_IO;
-    }
-
+    // Nếu chân này đang được giữ, nhả ra trước
     if (requests[pin] != NULL) {
         gpiod_line_request_release(requests[pin]);
         requests[pin] = NULL;
+        usleep(20000); // Đợi 20ms cho kernel dọn dẹp
     }
 
+    // 1. Mở chip tạm thời để xin quyền
+    struct gpiod_chip *chip = gpiod_chip_open(CHIP_PATH);
+    if (!chip) {
+        perror("[HIL_DEBUG] gpiod_chip_open failed");
+        return GPIO_ERR_IO;
+    }
+
+    // 2. Cấu hình tính chất
     struct gpiod_line_settings *settings = gpiod_line_settings_new();
     if (dir == GPIO_OUT) {
         gpiod_line_settings_set_direction(settings, GPIOD_LINE_DIRECTION_OUTPUT);
@@ -37,19 +43,25 @@ int gpio_init(int pin, int dir) {
     }
 
     struct gpiod_line_config *line_cfg = gpiod_line_config_new();
-    
-    // FIX: Ép kiểu sang unsigned int để tương thích hoàn toàn kiến trúc 64-bit ARM
     unsigned int offset = pin; 
     gpiod_line_config_add_line_settings(line_cfg, &offset, 1, settings);
 
     struct gpiod_request_config *req_cfg = gpiod_request_config_new();
     gpiod_request_config_set_consumer(req_cfg, "gpio_ctrl");
 
+    // 3. Yêu cầu chiếm quyền điều khiển chân
     requests[pin] = gpiod_chip_request_lines(chip, req_cfg, line_cfg);
+    
+    // Nếu lỗi, in thẳng nguyên nhân từ hệ điều hành ra log GitHub
+    if (!requests[pin]) {
+        perror("[HIL_DEBUG] gpiod_chip_request_lines failed");
+    }
 
+    // 4. Giải phóng bộ nhớ và ĐÓNG CHIP ngay lập tức
     gpiod_request_config_free(req_cfg);
     gpiod_line_config_free(line_cfg);
     gpiod_line_settings_free(settings);
+    gpiod_chip_close(chip); // Chip đóng, nhưng request vẫn giữ quyền điều khiển chân
 
     if (!requests[pin]) return GPIO_ERR_IO;
 
@@ -91,10 +103,12 @@ int gpio_close(int pin) {
     if (pin < 2 || pin > 27) return GPIO_ERR_PARAM;
     if (requests[pin] == NULL) return GPIO_ERR_STATE;
 
-    // FIX: Chỉ gọi release để trả tài nguyên, OS sẽ tự dọn dẹp phần cứng. Tránh Race Condition.
     gpiod_line_request_release(requests[pin]);
     requests[pin] = NULL;
     pin_dirs[pin] = -1;
+
+    // ÉP HỆ THỐNG CHỜ 20ms: Cho phép Kernel xả hoàn toàn file descriptor của chân GPIO
+    usleep(20000); 
 
     return GPIO_OK;
 }
