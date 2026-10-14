@@ -59,8 +59,11 @@ int test_T6() {
     int res;
 
     // 1. Init và Write bình thường
-    gpio_init(17, GPIO_OUT);
-    gpio_write(17, 1);
+    res = gpio_init(17, GPIO_OUT);
+    EXPECT_EQ(res, GPIO_OK, "gpio_init(17) trong T6 phai tra ve OK", &fails);
+    
+    res = gpio_write(17, 1);
+    EXPECT_EQ(res, GPIO_OK, "gpio_write(17, 1) trong T6 phai tra ve OK", &fails);
 
     // 2. Gọi hàm close
     res = gpio_close(17);

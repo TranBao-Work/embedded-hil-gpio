@@ -1,12 +1,13 @@
 #include "gpio_ctrl.h"
 #include <gpiod.h>
 #include <stdio.h>
-#include <unistd.h> // dùng cho usleep
+#include <unistd.h>
 
 #define MAX_PINS 30
-#define CHIP_PATH "/dev/gpiochip4" // Đường dẫn chip trên Pi 4 cho API v2
+#define CHIP_PATH "/dev/gpiochip4"
 
-// API v2 quản lý theo Request thay vì Line đơn lẻ
+// Giữ chip mở liên tục suốt vòng đời chương trình
+static struct gpiod_chip *chip = NULL;
 static struct gpiod_line_request *requests[MAX_PINS] = {NULL};
 
 static int pin_dirs[MAX_PINS] = {
@@ -19,40 +20,40 @@ int gpio_init(int pin, int dir) {
     if (pin < 2 || pin > 27) return GPIO_ERR_PARAM;
     if (dir != GPIO_IN && dir != GPIO_OUT) return GPIO_ERR_PARAM;
 
-    // Giải phóng chân nếu đã được cấp phát trước đó
+    // 1. Mở chip 1 lần duy nhất và giữ luôn trạng thái mở
+    if (chip == NULL) {
+        chip = gpiod_chip_open(CHIP_PATH);
+        if (!chip) return GPIO_ERR_IO;
+    }
+
+    // 2. Giải phóng chân nếu đã được cấp phát trước đó
     if (requests[pin] != NULL) {
         gpiod_line_request_release(requests[pin]);
         requests[pin] = NULL;
     }
 
-    struct gpiod_chip *chip = gpiod_chip_open(CHIP_PATH);
-    if (!chip) return GPIO_ERR_IO;
-
-    // 1. Cấu hình tính chất của chân
+    // 3. Cấu hình tính chất của chân
     struct gpiod_line_settings *settings = gpiod_line_settings_new();
     if (dir == GPIO_OUT) {
         gpiod_line_settings_set_direction(settings, GPIOD_LINE_DIRECTION_OUTPUT);
-        gpiod_line_settings_set_output_value(settings, GPIOD_LINE_VALUE_INACTIVE); // Mặc định mức 0
+        gpiod_line_settings_set_output_value(settings, GPIOD_LINE_VALUE_INACTIVE);
     } else {
         gpiod_line_settings_set_direction(settings, GPIOD_LINE_DIRECTION_INPUT);
     }
 
-    // 2. Gán tính chất cho đúng số pin
     struct gpiod_line_config *line_cfg = gpiod_line_config_new();
     gpiod_line_config_add_line_settings(line_cfg, &pin, 1, settings);
 
-    // 3. Cấu hình yêu cầu hệ thống
     struct gpiod_request_config *req_cfg = gpiod_request_config_new();
     gpiod_request_config_set_consumer(req_cfg, "gpio_ctrl");
 
     // 4. Gửi yêu cầu chiếm quyền điều khiển chân
     requests[pin] = gpiod_chip_request_lines(chip, req_cfg, line_cfg);
 
-    // 5. Dọn dẹp bộ nhớ cấu hình sau khi request xong
+    // Dọn dẹp bộ nhớ cấu hình (Không đóng chip ở đây nữa)
     gpiod_request_config_free(req_cfg);
     gpiod_line_config_free(line_cfg);
     gpiod_line_settings_free(settings);
-    gpiod_chip_close(chip);
 
     if (!requests[pin]) return GPIO_ERR_IO;
 
@@ -94,6 +95,19 @@ int gpio_close(int pin) {
     if (pin < 2 || pin > 27) return GPIO_ERR_PARAM;
     if (requests[pin] == NULL) return GPIO_ERR_STATE;
 
+    // Yêu cầu cấu hình lại thành Input an toàn trước khi nhả
+    struct gpiod_line_settings *settings = gpiod_line_settings_new();
+    gpiod_line_settings_set_direction(settings, GPIOD_LINE_DIRECTION_INPUT);
+    
+    struct gpiod_line_config *line_cfg = gpiod_line_config_new();
+    gpiod_line_config_add_line_settings(line_cfg, &pin, 1, settings);
+    
+    gpiod_line_request_reconfigure_lines(requests[pin], line_cfg);
+    
+    gpiod_line_config_free(line_cfg);
+    gpiod_line_settings_free(settings);
+
+    // Giải phóng
     gpiod_line_request_release(requests[pin]);
     requests[pin] = NULL;
     pin_dirs[pin] = -1;
