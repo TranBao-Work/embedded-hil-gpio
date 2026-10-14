@@ -1,40 +1,104 @@
 #include <stdio.h>
 #include "../src/gpio_ctrl.h"
 
+// ---------------------------------------------------------
+// MACRO KIỂM THỬ: Tự động so sánh và in báo cáo chi tiết
+// ---------------------------------------------------------
+#define EXPECT_EQ(actual, expected, msg, fail_counter) \
+    do { \
+        if ((actual) != (expected)) { \
+            printf("  [FAIL] %s\n", msg); \
+            printf("         -> Ky vong (Expected): %d\n", expected); \
+            printf("         -> Thuc te (Actual)  : %d\n", actual); \
+            (*fail_counter)++; \
+        } else { \
+            printf("  [ OK ] %s\n", msg); \
+        } \
+    } while(0)
+
+// ---------------------------------------------------------
+// TESTCASE T5: Tham số sai không crash
+// ---------------------------------------------------------
 int test_T5() {
-    printf("Chay T5: Kiem tra tham so sai...\n");
+    printf("\n--- Chay T5: Kiem tra tham so sai (Khong crash) ---\n");
+    int fails = 0;
+    int res;
+
+    // 1. Kiểm tra init chân không tồn tại
+    res = gpio_init(99, GPIO_OUT);
+    EXPECT_EQ(res, GPIO_ERR_PARAM, "gpio_init(99, OUT) phai bao loi PARAM", &fails);
+
+    // 2. Kiểm tra init sai chiều
+    res = gpio_init(17, 7);
+    EXPECT_EQ(res, GPIO_ERR_PARAM, "gpio_init(17, 7) phai bao loi PARAM", &fails);
+
+    // 3. Kiểm tra write sai mức logic
+    // (Giả sử 17 đã được init hợp lệ trước đó, nhưng ta test hàm write)
+    gpio_init(17, GPIO_OUT); 
+    res = gpio_write(17, 2);
+    EXPECT_EQ(res, GPIO_ERR_PARAM, "gpio_write(17, 2) phai bao loi PARAM", &fails);
     
-    // Đưa vào 1 chân không tồn tại (chân 99)
-    int res1 = gpio_init(99, GPIO_OUT);
-    if (res1 != GPIO_ERR_PARAM) {
-        printf("[FAIL] T5: Loi - gpio_init(99) khong tra ve GPIO_ERR_PARAM\n");
-        return 1; // Báo lỗi
-    }
+    // 4. Giải phóng chân 17 để không ảnh hưởng test khác
+    gpio_close(17);
 
-    // Đưa vào chiều không hợp lệ (7)
-    int res2 = gpio_init(17, 7);
-    if (res2 != GPIO_ERR_PARAM) {
-        printf("[FAIL] T5: Loi - gpio_init(17, 7) khong tra ve GPIO_ERR_PARAM\n");
-        return 1; // Báo lỗi
+    // Tổng kết T5
+    if (fails == 0) {
+        printf("[PASS] T5 hoan thanh. Khong co loi.\n");
+    } else {
+        printf("[FAIL] T5 that bai voi %d loi chi tiet nhu tren.\n", fails);
     }
-
-    printf("[PASS] T5 Tham so sai khong crash\n");
-    return 0; // Thành công
+    return fails;
 }
 
+// ---------------------------------------------------------
+// TESTCASE T6: Giải phóng chân bằng gpio_close
+// ---------------------------------------------------------
+int test_T6() {
+    printf("\n--- Chay T6: Kiem tra giai phong chan ---\n");
+    int fails = 0;
+    int res;
+
+    // 1. Init và Write bình thường
+    gpio_init(17, GPIO_OUT);
+    gpio_write(17, 1);
+
+    // 2. Gọi hàm close
+    res = gpio_close(17);
+    EXPECT_EQ(res, GPIO_OK, "gpio_close(17) phai tra ve OK", &fails);
+
+    // 3. Cố tình write vào chân đã close
+    res = gpio_write(17, 1);
+    EXPECT_EQ(res, GPIO_ERR_STATE, "gpio_write(17) sau khi close phai bao loi STATE", &fails);
+
+    // Tổng kết T6
+    if (fails == 0) {
+        printf("[PASS] T6 hoan thanh. Khong co loi.\n");
+    } else {
+        printf("[FAIL] T6 that bai voi %d loi chi tiet.\n", fails);
+    }
+    return fails;
+}
+
+// ---------------------------------------------------------
+// HÀM MAIN: Chạy bộ test và trả Exit Code cho GitHub Actions
+// ---------------------------------------------------------
 int main() {
-    int fail_count = 0;
+    printf("==========================================\n");
+    printf("BAT DAU CHAY HIL TEST TREN RASPBERRY PI 4\n");
+    printf("==========================================\n");
+
+    int total_fails = 0;
     
-    // Gọi thử T5
-    fail_count += test_T5();
-    
-    // Có thể viết thêm test_T6() và gọi ở đây
-    
-    if (fail_count > 0) {
-        printf("RESULT: FAIL\n");
-        return 1; // Exit code 1 báo cho GitHub Runner biết là Test Fail
+    // Gọi lần lượt các testcase
+    total_fails += test_T5();
+    total_fails += test_T6();
+
+    printf("\n==========================================\n");
+    if (total_fails > 0) {
+        printf("RESULT: FAIL - Phat hien %d loi logic trong code!\n", total_fails);
+        return 1; // Exit 1 sẽ làm GitHub Actions báo đỏ (Failed)
     }
     
-    printf("RESULT: ALL PASS\n");
-    return 0; // Exit code 0 báo GitHub Runner là Pass
+    printf("RESULT: ALL PASS - Hoan hao!\n");
+    return 0; // Exit 0 sẽ làm GitHub Actions báo xanh (Success)
 }
