@@ -18,7 +18,7 @@ jobs:
       run: |
         unset LD_LIBRARY_PATH
         source /opt/poky/5.0.20/environment-setup-cortexa72-poky-linux
-        $CC -o hil_test tests/hil_test.c src/gpio_ctrl.c -lgpiod
+        $CC -o hil_test tests/hil_test.c src/gpio_ctrl.c -lgpiod -pthread
 
     - name: Day file sang Raspberry Pi 4 (/tmp)
       run: |
