@@ -5,7 +5,7 @@
 #include <errno.h> // Để in lỗi hệ thống
 
 #define MAX_PINS 30
-#define CHIP_PATH "/dev/gpiochip4"
+#define CHIP_PATH "/dev/gpiochip0"
 
 // Bỏ biến chip toàn cục, chỉ giữ lại mảng lưu các requests
 static struct gpiod_line_request *requests[MAX_PINS] = {NULL};
