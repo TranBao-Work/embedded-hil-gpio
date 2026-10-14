@@ -1,16 +1,14 @@
 #include "gpio_ctrl.h"
 #include <gpiod.h>
 #include <stdio.h>
-#include <unistd.h> // dùng cho hàm usleep (tạo delay)
+#include <unistd.h> // dùng cho usleep
 
 #define MAX_PINS 30
-#define GPIO_CHIP_NAME "gpiochip4" // Chip GPIO tiêu chuẩn trên Raspberry Pi 4
+#define CHIP_PATH "/dev/gpiochip4" // Đường dẫn chip trên Pi 4 cho API v2
 
-// Biến toàn cục để lưu trạng thái của từng chân GPIO
-static struct gpiod_chip *chip = NULL;
-static struct gpiod_line *lines[MAX_PINS] = {NULL};
+// API v2 quản lý theo Request thay vì Line đơn lẻ
+static struct gpiod_line_request *requests[MAX_PINS] = {NULL};
 
-// Mảng lưu chiều của chân: -1 (chưa khởi tạo), 0 (IN), 1 (OUT)
 static int pin_dirs[MAX_PINS] = {
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
@@ -18,79 +16,74 @@ static int pin_dirs[MAX_PINS] = {
 };
 
 int gpio_init(int pin, int dir) {
-    // 1. Kiểm tra tham số đầu vào (Pass kịch bản T5)
     if (pin < 2 || pin > 27) return GPIO_ERR_PARAM;
     if (dir != GPIO_IN && dir != GPIO_OUT) return GPIO_ERR_PARAM;
 
-    // 2. Mở chip GPIO nếu chưa mở
-    if (chip == NULL) {
-        chip = gpiod_chip_open_by_name(GPIO_CHIP_NAME);
-        if (chip == NULL) return GPIO_ERR_IO;
+    // Giải phóng chân nếu đã được cấp phát trước đó
+    if (requests[pin] != NULL) {
+        gpiod_line_request_release(requests[pin]);
+        requests[pin] = NULL;
     }
 
-    // 3. Giải phóng chân nếu đã được cấp phát trước đó
-    if (lines[pin] != NULL) {
-        gpiod_line_release(lines[pin]);
-    }
+    struct gpiod_chip *chip = gpiod_chip_open(CHIP_PATH);
+    if (!chip) return GPIO_ERR_IO;
 
-    // 4. Lấy line tương ứng với chân
-    lines[pin] = gpiod_chip_get_line(chip, pin);
-    if (lines[pin] == NULL) return GPIO_ERR_IO;
-
-    // 5. Cấu hình chiều (Input hoặc Output)
-    int ret;
+    // 1. Cấu hình tính chất của chân
+    struct gpiod_line_settings *settings = gpiod_line_settings_new();
     if (dir == GPIO_OUT) {
-        // Yêu cầu là Output, mặc định mức 0 theo đặc tả
-        ret = gpiod_line_request_output(lines[pin], "gpio_ctrl", 0);
+        gpiod_line_settings_set_direction(settings, GPIOD_LINE_DIRECTION_OUTPUT);
+        gpiod_line_settings_set_output_value(settings, GPIOD_LINE_VALUE_INACTIVE); // Mặc định mức 0
     } else {
-        ret = gpiod_line_request_input(lines[pin], "gpio_ctrl");
+        gpiod_line_settings_set_direction(settings, GPIOD_LINE_DIRECTION_INPUT);
     }
 
-    if (ret < 0) {
-        lines[pin] = NULL;
-        return GPIO_ERR_IO;
-    }
+    // 2. Gán tính chất cho đúng số pin
+    struct gpiod_line_config *line_cfg = gpiod_line_config_new();
+    gpiod_line_config_add_line_settings(line_cfg, &pin, 1, settings);
+
+    // 3. Cấu hình yêu cầu hệ thống
+    struct gpiod_request_config *req_cfg = gpiod_request_config_new();
+    gpiod_request_config_set_consumer(req_cfg, "gpio_ctrl");
+
+    // 4. Gửi yêu cầu chiếm quyền điều khiển chân
+    requests[pin] = gpiod_chip_request_lines(chip, req_cfg, line_cfg);
+
+    // 5. Dọn dẹp bộ nhớ cấu hình sau khi request xong
+    gpiod_request_config_free(req_cfg);
+    gpiod_line_config_free(line_cfg);
+    gpiod_line_settings_free(settings);
+    gpiod_chip_close(chip);
+
+    if (!requests[pin]) return GPIO_ERR_IO;
 
     pin_dirs[pin] = dir;
     return GPIO_OK;
 }
 
 int gpio_write(int pin, int level) {
-    // 1. Kiểm tra tham số (Pass kịch bản T5)
     if (pin < 2 || pin > 27) return GPIO_ERR_PARAM;
     if (level != 0 && level != 1) return GPIO_ERR_PARAM;
+    if (requests[pin] == NULL || pin_dirs[pin] != GPIO_OUT) return GPIO_ERR_STATE;
 
-    // 2. Kiểm tra trạng thái chân (Pass kịch bản T6)
-    if (lines[pin] == NULL || pin_dirs[pin] != GPIO_OUT) {
-        return GPIO_ERR_STATE;
-    }
-
-    // 3. Xuất mức logic
-    int ret = gpiod_line_set_value(lines[pin], level);
+    int val = (level == 1) ? GPIOD_LINE_VALUE_ACTIVE : GPIOD_LINE_VALUE_INACTIVE;
+    int ret = gpiod_line_request_set_value(requests[pin], pin, val);
     if (ret < 0) return GPIO_ERR_IO;
 
     return GPIO_OK;
 }
 
 int gpio_pulse(int pin, int count, int period_ms) {
-    // 1. Kiểm tra tham số (Pass kịch bản T5)
     if (pin < 2 || pin > 27) return GPIO_ERR_PARAM;
     if (count < 1 || count > 1000) return GPIO_ERR_PARAM;
     if (period_ms < 2 || period_ms > 1000) return GPIO_ERR_PARAM;
+    if (requests[pin] == NULL || pin_dirs[pin] != GPIO_OUT) return GPIO_ERR_STATE;
 
-    // 2. Kiểm tra trạng thái
-    if (lines[pin] == NULL || pin_dirs[pin] != GPIO_OUT) {
-        return GPIO_ERR_STATE;
-    }
-
-    // 3. Tính toán thời gian nửa chu kỳ (micro-giây)
     int half_period_us = (period_ms * 1000) / 2;
 
-    // 4. Phát xung bằng vòng lặp
     for (int i = 0; i < count; i++) {
-        gpiod_line_set_value(lines[pin], 1);
+        gpiod_line_request_set_value(requests[pin], pin, GPIOD_LINE_VALUE_ACTIVE);
         usleep(half_period_us);
-        gpiod_line_set_value(lines[pin], 0);
+        gpiod_line_request_set_value(requests[pin], pin, GPIOD_LINE_VALUE_INACTIVE);
         usleep(half_period_us);
     }
 
@@ -99,18 +92,10 @@ int gpio_pulse(int pin, int count, int period_ms) {
 
 int gpio_close(int pin) {
     if (pin < 2 || pin > 27) return GPIO_ERR_PARAM;
+    if (requests[pin] == NULL) return GPIO_ERR_STATE;
 
-    // Kiểm tra xem chân đã init chưa
-    if (lines[pin] == NULL) {
-        return GPIO_ERR_STATE;
-    }
-
-    // Yêu cầu chuyển về Input (an toàn phần cứng) rồi giải phóng line
-    gpiod_line_request_input(lines[pin], "gpio_ctrl_close");
-    gpiod_line_release(lines[pin]);
-    
-    // Đặt lại trạng thái để hàm write báo lỗi (Pass kịch bản T6)
-    lines[pin] = NULL;
+    gpiod_line_request_release(requests[pin]);
+    requests[pin] = NULL;
     pin_dirs[pin] = -1;
 
     return GPIO_OK;
