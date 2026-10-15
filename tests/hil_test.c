@@ -249,7 +249,7 @@ int main() {
 
     printf("\n====================================================\n");
     if (total_fails > 0) {
-        printf("RESULT: %d LOI PHAT HIEN! -> EXIT 1 (CHAM MERGE)\n", total_fails);
+        printf("RESULT: %d LOI PHAT HIEN! -> EXIT 1 (CHAN MERGE)\n", total_fails);
         return 1;
     }
     
