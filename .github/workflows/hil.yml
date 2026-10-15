@@ -29,5 +29,6 @@ jobs:
         ssh root@10.42.0.139 "/tmp/hil_test"
 
     - name: Don dep file rac sau khi test
+      if: always()
       run: |
         ssh root@10.42.0.139 "rm /tmp/hil_test"
