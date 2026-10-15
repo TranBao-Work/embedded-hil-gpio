@@ -74,7 +74,7 @@ int gpio_write(int pin, int level) {
     if (level != 0 && level != 1) return GPIO_ERR_PARAM;
     if (requests[pin] == NULL || pin_dirs[pin] != GPIO_OUT) return GPIO_ERR_STATE;
 
-    // int val = (level == 1) ? GPIOD_LINE_VALUE_ACTIVE : GPIOD_LINE_VALUE_INACTIVE; abc
+    // int val = (level == 1) ? GPIOD_LINE_VALUE_ACTIVE : GPIOD_LINE_VALUE_INACTIVE; abcxyz
     int val = (level == 1) ? GPIOD_LINE_VALUE_INACTIVE : GPIOD_LINE_VALUE_ACTIVE;
 
     int ret = gpiod_line_request_set_value(requests[pin], pin, val);
